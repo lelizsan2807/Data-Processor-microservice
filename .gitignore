@@ -38,3 +38,30 @@ terraform.rc
 
 #ignore .exe
 *.exe
+
+
+# Ansible inventory containing real server details
+ansible/inventory/hosts.ini
+
+# Ansible retry files
+*.retry
+
+# Ansible vault password files
+.vault_password
+.vault-password
+vault-password.txt
+
+# Sensitive variable files
+ansible/group_vars/*/vault.yml
+ansible/host_vars/*/vault.yml
+ansible/**/*secrets*.yml
+ansible/**/*secret*.yml
+
+# Temporary and local Ansible files
+ansible/*.log
+ansible/tmp/
+ansible/.cache/
+
+# Python cache files
+__pycache__/
+*.py[cod]
