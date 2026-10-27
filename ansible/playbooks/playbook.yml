@@ -1,0 +1,7 @@
+---
+- name: Deploy Data Processor service
+  hosts: dataproc_servers
+  become: true
+
+  roles:
+    - dataproc
