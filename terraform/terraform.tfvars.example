@@ -1,0 +1,5 @@
+aws_region      = "us-east-1"
+instance_type   = "t3.micro"
+my_ip_cidr      = "YOUR_PUBLIC_IP/32"
+public_key_path = "PATH_TO_YOUR_PUBLIC_KEY"
+project_name    = "data-processor"
