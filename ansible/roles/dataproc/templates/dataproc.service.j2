@@ -1,0 +1,15 @@
+[Unit]
+Description=Data Processor Docker Compose Service
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/dataproc
+ExecStart=/usr/bin/docker compose -f /opt/dataproc/docker-compose.yml up -d --build
+ExecStop=/usr/bin/docker compose -f /opt/dataproc/docker-compose.yml down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

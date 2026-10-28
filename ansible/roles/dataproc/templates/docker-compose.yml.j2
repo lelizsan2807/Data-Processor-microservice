@@ -1,0 +1,29 @@
+services:
+  api:
+    build:
+      context: /opt/dataproc/app
+    container_name: dataproc-api
+    user: "2048:2048"
+    restart: unless-stopped
+    expose:
+      - "5000"
+    networks:
+      - dataproc
+
+  nginx:
+    image: nginx:stable
+    container_name: dataproc-nginx
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8080:8080"
+    volumes:
+      - /opt/dataproc/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /var/log/nginx/custom-access.log:/var/log/nginx/custom-access.log
+    networks:
+      - dataproc
+
+networks:
+  dataproc:
+    driver: bridge
