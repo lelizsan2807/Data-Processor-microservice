@@ -5,6 +5,11 @@ services:
     container_name: dataproc-api
     user: "2048:2048"
     restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     expose:
       - "5000"
     networks:
@@ -23,6 +28,8 @@ services:
       - /var/log/nginx/custom-access.log:/var/log/nginx/custom-access.log
     networks:
       - dataproc
+    security_opt:
+      - no-new-privileges:true
 
 networks:
   dataproc:
