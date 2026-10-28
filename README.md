@@ -51,11 +51,9 @@ Data-Processor-microservice/
 └── README.md
 ```
 
-*Note: The exact playbook filename should match the file in the repository. The automation supports `deploy.yml` or `playbook.yml`.*
-
 ## 4. Prerequisites
 
-- An AWS account with permissions to create the resources defined in Terraform.
+- An AWS account with permissions to create the resources defined in Terraform (EC2).
 - AWS CLI credentials configured in the environment.
 - Terraform.
 - Ansible and the `community.general` collection.
@@ -63,7 +61,6 @@ Data-Processor-microservice/
 - Git.
 - Docker and Docker Compose are installed on the target server by Ansible.
 
-For Windows, the deployment scripts use WSL2 with an Ubuntu distribution because Ansible requires a Linux control environment.
 
 ## 5. Configuration
 
@@ -102,20 +99,6 @@ The script is intended to:
 
 Review the Terraform plan before confirming the apply operation.
 
-### Windows PowerShell
-
-With WSL2 and the required tools configured inside the selected Linux distribution:
-
-```powershell
-.\scripts\deploy.ps1
-```
-
-If your distribution has a different name, specify it:
-
-```powershell
-.\scripts\deploy.ps1 -WslDistro "Ubuntu-24.04"
-```
-
 ### Option B: Manual deployment
 
 Terraform can be run separately:
@@ -142,8 +125,6 @@ Run the playbook from the repository root, using the filename present in the rep
 ```bash
 ansible-playbook -i ansible/inventory/hosts.ini ansible/playbooks/deploy.yml
 ```
-
-If the playbook is still named `playbook.yml`, use that filename instead.
 
 ## 7. Security Controls
 
@@ -188,20 +169,12 @@ sudo docker logs dataproc-api
 sudo docker logs dataproc-nginx
 ```
 
-The current Python application uses Python's standard-library HTTP server. Confirm the required application behavior separately; a successful HTTP response alone does not establish that a complete business API has been implemented.
-
 ## 9. Destroying Infrastructure
 
 When the environment is no longer needed, use the guarded teardown script:
 
 ```bash
 ./scripts/destroy.sh
-```
-
-On Windows, use:
-
-```powershell
-.\scripts\destroy.ps1
 ```
 
 The script displays a destruction plan and requires explicit confirmation before deleting Terraform-managed resources.
@@ -214,14 +187,6 @@ terraform destroy
 ```
 
 Review the plan carefully before confirming. Resources created outside the current Terraform state may require separate cleanup.
-
-## 10. Limitations and Future Improvements
-
-- Add automated tests for the application and deployment configuration.
-- Implement and document the intended data-processing API behavior.
-- Add health checks and improved monitoring.
-- Verify the complete deployment and teardown workflow from a clean environment.
-- Improve the handling of generated Ansible inventory and Terraform state across environments.
 
 ## 11. Summary
 
