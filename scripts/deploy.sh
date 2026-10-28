@@ -2,7 +2,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Resolve repository root from scripts/deploy.sh.
+# Resolve paths relative to scripts/deploy.sh.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TF_DIR="$ROOT_DIR/terraform"
@@ -13,6 +13,7 @@ INVENTORY_FILE="$INVENTORY_DIR/hosts.ini"
 PLAYBOOK="$ANSIBLE_DIR/playbooks/deploy.yml"
 
 ANSIBLE_VENV="${ANSIBLE_VENV:-$HOME/ansible-venv}"
+TF_PLAN="$TF_DIR/deploy.tfplan"
 
 log() {
     printf '\n==> %s\n' "$*"
@@ -23,60 +24,110 @@ die() {
     exit 1
 }
 
+cleanup() {
+    rm -f "$TF_PLAN"
+}
+trap cleanup EXIT
+
 # ------------------------------------------------------------
-# 1. Check project files and base dependencies
+# 1. Verify project files
 # ------------------------------------------------------------
 for path in \
     "$TF_DIR/main.tf" \
     "$TF_DIR/terraform.tfvars.example" \
     "$ANSIBLE_DIR/roles/dataproc/tasks/main.yml" \
-    "$PLAYBOOK"
+    "$PLAYBOOK" \
+    "$SCRIPT_DIR/setup-terraform.sh"
 do
     [[ -f "$path" ]] || die "Required project file not found: $path"
 done
 
-for tool in python3 ssh ssh-keygen curl; do
+# ------------------------------------------------------------
+# 2. Install prerequisites where possible
+# ------------------------------------------------------------
+log "Checking system prerequisites"
+
+for tool in sudo apt-get; do
     command -v "$tool" >/dev/null 2>&1 ||
         die "Required command '$tool' is missing."
 done
 
-command -v terraform >/dev/null 2>&1 ||
-    die "Terraform is not installed or not on PATH."
+if [[ "$(id -u)" -ne 0 ]]; then
+    sudo -v || die "Administrator privileges are required to install dependencies."
+fi
 
-command -v aws >/dev/null 2>&1 ||
-    die "AWS CLI is not installed or not on PATH."
+if ! command -v terraform >/dev/null 2>&1; then
+    log "Installing Terraform"
+
+    sudo apt-get update
+    sudo apt-get install -y wget gpg ca-certificates
+
+    sudo install -d -m 0755 /usr/share/keyrings
+
+    wget -qO- https://apt.releases.hashicorp.com/gpg \
+        | gpg --dearmor \
+        | sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg >/dev/null
+
+    sudo chmod 644 /usr/share/keyrings/hashicorp-archive-keyring.gpg
+
+    CODENAME="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")"
+
+    [[ -n "$CODENAME" ]] || die "Could not determine the OS release codename."
+
+    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com ${CODENAME} main" \
+        | sudo tee /etc/apt/sources.list.d/hashicorp.list >/dev/null
+
+    sudo apt-get update
+    sudo apt-get install -y terraform
+fi
+
+# Install packages that provide the other required commands and
+# Python virtual-environment support.
+sudo apt-get update
+sudo apt-get install -y \
+    python3 \
+    python3-venv \
+    python3-pip \
+    openssh-client \
+    curl \
+    ca-certificates \
+    awscli
+
+for tool in python3 ssh ssh-keygen curl aws terraform; do
+    command -v "$tool" >/dev/null 2>&1 ||
+        die "Required command '$tool' is still missing after installation."
+done
+
+terraform -version
+aws --version
 
 # ------------------------------------------------------------
-# 2. Automatically create Terraform variables when missing
+# 3. Prepare Terraform variables
 # ------------------------------------------------------------
 log "Preparing Terraform variables"
 
-TFVARS="$TF_DIR/terraform.tfvars"
-
 if [[ ! -f "$TFVARS" ]]; then
-    SETUP_SCRIPT="$SCRIPT_DIR/setup-terraform.sh"
-
-    [[ -f "$SETUP_SCRIPT" ]] ||
-        die "Missing $SETUP_SCRIPT"
-
-    chmod +x "$SETUP_SCRIPT"
-    "$SETUP_SCRIPT"
+    chmod +x "$SCRIPT_DIR/setup-terraform.sh"
+    "$SCRIPT_DIR/setup-terraform.sh"
 fi
 
 [[ -f "$TFVARS" ]] || die "terraform.tfvars was not created."
 chmod 600 "$TFVARS"
 
-# Read the public key path from Terraform variables.
+# Read public_key_path from terraform.tfvars.
 PUBLIC_KEY_PATH="$(
     python3 - "$TFVARS" <<'PY'
 import re
 import sys
 
-text = open(sys.argv[1], encoding="utf-8").read()
+with open(sys.argv[1], encoding="utf-8") as f:
+    text = f.read()
+
 match = re.search(
     r'(?m)^\s*public_key_path\s*=\s*"((?:\\.|[^"\\])*)"\s*$',
     text
 )
+
 if not match:
     sys.exit("Could not read public_key_path from terraform.tfvars.")
 
@@ -86,8 +137,6 @@ print(value)
 PY
 )" || die "Could not read the public key path."
 
-# This setup script creates the public key by appending .pub
-# to the selected private key path.
 SSH_KEY="${SSH_KEY:-${PUBLIC_KEY_PATH%.pub}}"
 
 [[ -f "$PUBLIC_KEY_PATH" ]] ||
@@ -99,16 +148,20 @@ SSH_KEY="${SSH_KEY:-${PUBLIC_KEY_PATH%.pub}}"
 chmod 600 "$SSH_KEY"
 
 # ------------------------------------------------------------
-# 3. Validate AWS credentials
+# 4. Validate AWS credentials
 # ------------------------------------------------------------
 log "Checking AWS credentials"
 
 AWS_REGION="$(
     python3 - "$TFVARS" <<'PY'
-import re, sys
-text = open(sys.argv[1], encoding="utf-8").read()
-m = re.search(r'(?m)^\s*aws_region\s*=\s*"([^"]+)"', text)
-print(m.group(1) if m else "us-east-1")
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    text = f.read()
+
+match = re.search(r'(?m)^\s*aws_region\s*=\s*"([^"]+)"', text)
+print(match.group(1) if match else "us-east-1")
 PY
 )"
 
@@ -116,10 +169,10 @@ export AWS_REGION
 export AWS_DEFAULT_REGION="$AWS_REGION"
 
 aws sts get-caller-identity >/dev/null ||
-    die "AWS credentials are unavailable. Configure your AWS CLI or CloudShell session."
+    die "AWS credentials are unavailable or invalid. Configure AWS CLI credentials first."
 
 # ------------------------------------------------------------
-# 4. Initialize and apply Terraform
+# 5. Initialize and validate Terraform
 # ------------------------------------------------------------
 log "Initializing Terraform"
 terraform -chdir="$TF_DIR" init
@@ -127,15 +180,28 @@ terraform -chdir="$TF_DIR" init
 log "Validating Terraform"
 terraform -chdir="$TF_DIR" validate
 
+# ------------------------------------------------------------
+# 6. Plan and confirm infrastructure changes
+# ------------------------------------------------------------
 log "Planning infrastructure"
 terraform -chdir="$TF_DIR" plan -out=deploy.tfplan
 
-log "Applying infrastructure"
-terraform -chdir="$TF_DIR" apply deploy.tfplan
-rm -f "$TF_DIR/deploy.tfplan"
+echo
+echo "Review the Terraform plan above."
+read -r -p "Apply these infrastructure changes? This may incur AWS charges. [y/N] " CONFIRM
+
+case "$CONFIRM" in
+    y|Y|yes|YES)
+        log "Applying Terraform plan"
+        terraform -chdir="$TF_DIR" apply deploy.tfplan
+        ;;
+    *)
+        die "Deployment cancelled. No Terraform changes were applied."
+        ;;
+esac
 
 # ------------------------------------------------------------
-# 5. Get the EC2 public IP
+# 7. Get the EC2 public IP
 # ------------------------------------------------------------
 log "Reading EC2 public IP"
 
@@ -145,13 +211,14 @@ EC2_IP="$(terraform -chdir="$TF_DIR" output -raw public_ip)"
 echo "EC2 public IP: $EC2_IP"
 
 # ------------------------------------------------------------
-# 6. Prepare Ansible virtual environment
+# 8. Prepare Ansible virtual environment
 # ------------------------------------------------------------
 log "Preparing Ansible"
 
 if [[ ! -x "$ANSIBLE_VENV/bin/ansible-playbook" ]]; then
     python3 -m venv "$ANSIBLE_VENV" ||
-        die "Could not create the virtual environment. Install Python venv support for your distribution."
+        die "Could not create the Ansible virtual environment."
+
     "$ANSIBLE_VENV/bin/python" -m pip install --upgrade pip
     "$ANSIBLE_VENV/bin/python" -m pip install ansible
 fi
@@ -164,7 +231,7 @@ command -v ansible-playbook >/dev/null 2>&1 ||
 ansible-galaxy collection install community.general
 
 # ------------------------------------------------------------
-# 7. Generate Ansible inventory automatically
+# 9. Generate Ansible inventory
 # ------------------------------------------------------------
 log "Generating Ansible inventory"
 
@@ -178,7 +245,7 @@ INVENTORY
 chmod 600 "$INVENTORY_FILE"
 
 # ------------------------------------------------------------
-# 8. Wait for SSH
+# 10. Wait for SSH
 # ------------------------------------------------------------
 log "Waiting for SSH access"
 
@@ -201,10 +268,10 @@ for attempt in $(seq 1 30); do
 done
 
 [[ "$SSH_READY" == true ]] ||
-    die "Could not connect to ubuntu@$EC2_IP. Check the SSH key and security group."
+    die "Could not connect to ubuntu@$EC2_IP. Check the SSH key, security group, and instance status."
 
 # ------------------------------------------------------------
-# 9. Deploy with Ansible
+# 11. Deploy with Ansible
 # ------------------------------------------------------------
 log "Running Ansible deployment"
 
@@ -215,7 +282,7 @@ ansible-playbook \
     "$PLAYBOOK"
 
 # ------------------------------------------------------------
-# 10. Print results
+# 12. Print results
 # ------------------------------------------------------------
 APP_URL="$(terraform -chdir="$TF_DIR" output -raw application_url)"
 
