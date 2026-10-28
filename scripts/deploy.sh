@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Reproducible Terraform + Ansible deployment for AWS CloudShell / Amazon Linux.
-# Optional overrides:
-#   TF_DIR, ANSIBLE_DIR, SSH_KEY, TF_AUTO_INSTALL=0
-#   AWS_REGION (default: us-east-1)
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TF_DIR="${TF_DIR:-$HOME/terraform}"|TF_DIR="${TF_DIR:-$ROOT_DIR/terraform}"
-ANSIBLE_DIR="${ANSIBLE_DIR:-$ROOT_DIR/ansible}"
-AWS_REGION="${AWS_REGION:-us-east-1}"
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Resolve repository root from the scripts directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Define paths before referencing them.
+TF_DIR="$ROOT_DIR/terraform"
+ANSIBLE_DIR="$ROOT_DIR/ansible"
+INVENTORY_DIR="$ANSIBLE_DIR/inventory"
+INVENTORY_FILE="$INVENTORY_DIR/hosts.ini"
+PLAYBOOK="$ANSIBLE_DIR/playbooks/deploy.yml"
+
+ANSIBLE_VENV="${ANSIBLE_VENV:-$HOME/ansible-venv}"
 SSH_KEY="${SSH_KEY:-$HOME/.ssh/data-processor-key}"
-TF_AUTO_INSTALL="${TF_AUTO_INSTALL:-1}"
-PLAN_FILE="$TF_DIR/.deployment-plan.tfplan"
-INVENTORY_FILE="$ANSIBLE_DIR/inventory/hosts.ini"
-VENV_DIR="${ANSIBLE_VENV:-$HOME/ansible-venv}"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n==> %s\n' "$*"; }
