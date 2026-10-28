@@ -28,6 +28,7 @@ Data-Processor-microservice/
 │   └── entrypoint.sh
 ├── ansible/
 │   ├── inventory/
+    |    └── hosts.ini.example
 │   ├── playbooks/
 │   │   └── deploy.yml
 │   └── roles/
